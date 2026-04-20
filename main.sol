@@ -193,3 +193,68 @@ library OXRing {
     }
 
     function size(U64Ring storage r) internal view returns (uint64) {
+        return r.count;
+    }
+
+    function capacity(U64Ring storage r) internal view returns (uint64) {
+        return r.cap;
+    }
+
+    /// @notice Get element by age where 0 = newest.
+    function getNewestFirst(U64Ring storage r, uint64 age) internal view returns (uint64) {
+        uint64 n = r.count;
+        if (age >= n) revert OXRing__BadIndex();
+        uint64 cap = r.cap;
+        uint64 head = r.head;
+        unchecked {
+            uint64 newestIndex = head == 0 ? (cap - 1) : (head - 1);
+            uint64 idx = uint64((uint256(newestIndex) + uint256(cap) - uint256(age)) % uint256(cap));
+            return r.at[uint256(idx)];
+        }
+    }
+}
+
+contract OpiusXX is OXRoles, OXPausable, OXReentrancy {
+    using OXERC20 for IERC20Like;
+    using OXMath for uint256;
+    using OXRing for OXRing.U64Ring;
+
+    // ============
+    // Errors (distinct per-contract)
+    // ============
+    error OPX__BadConfig();
+    error OPX__BadCursor();
+    error OPX__OutOfRange();
+    error OPX__UnknownInstrument(uint32 instrumentId);
+    error OPX__SymbolRejected();
+    error OPX__StaleBatch(uint64 batchTs);
+    error OPX__NonceMismatch();
+    error OPX__SignatureRejected();
+    error OPX__FeeTokenUnset();
+    error OPX__FeeTooHigh();
+    error OPX__FeePaymentFailed();
+    error OPX__RoleIsLocked(bytes32 role);
+
+    // ============
+    // Events (distinct per-contract)
+    // ============
+    event OPX_Paused(bool paused);
+    event OPX_FeePolicySet(address indexed token, uint256 indexed feePerBatch, address indexed sink);
+    event OPX_InstrumentListed(uint32 indexed instrumentId, bytes16 indexed symbol, uint8 decimals, uint8 kind);
+    event OPX_InstrumentTuned(uint32 indexed instrumentId, uint32 maxTapeDepth, uint32 maxSignalDepth);
+    event OPX_BatchAccepted(uint64 indexed batchTs, uint64 indexed batchSeq, uint32 indexed instrumentCount);
+    event OPX_TapePrint(uint32 indexed instrumentId, uint64 indexed ts, int64 px, int64 qty, uint8 side);
+    event OPX_SignalPushed(uint32 indexed instrumentId, uint64 indexed ts, int64 score, bytes16 tag);
+    event OPX_WatchPinned(address indexed who, uint32 indexed instrumentId, uint8 slot);
+    event OPX_WatchCleared(address indexed who, uint8 slot);
+    event OPX_RoleLatch(bytes32 indexed role, address indexed caller);
+
+    // ============
+    // Roles (mainstream keccak strings)
+    // ============
+    bytes32 public constant ROLE_GOVERNOR = keccak256("OpiusXX.ROLE_GOVERNOR");
+    bytes32 public constant ROLE_ORACLE = keccak256("OpiusXX.ROLE_ORACLE");
+    bytes32 public constant ROLE_GUARDIAN = keccak256("OpiusXX.ROLE_GUARDIAN");
+    bytes32 public constant ROLE_RISK = keccak256("OpiusXX.ROLE_RISK");
+    bytes32 public constant ROLE_FEESINK = keccak256("OpiusXX.ROLE_FEESINK");
+
