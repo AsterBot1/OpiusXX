@@ -128,3 +128,68 @@ abstract contract OXRoles {
     event OX_RoleLocked(bytes32 indexed role, address indexed locker);
 
     mapping(bytes32 => mapping(address => bool)) internal _hasRole;
+    mapping(bytes32 => bool) internal _roleLocked;
+
+    modifier onlyRole(bytes32 role) {
+        if (!_hasRole[role][msg.sender]) revert OXRoles__Denied(role, msg.sender);
+        _;
+    }
+
+    function hasRole(bytes32 role, address account) public view returns (bool) {
+        return _hasRole[role][account];
+    }
+
+    function roleLocked(bytes32 role) public view returns (bool) {
+        return _roleLocked[role];
+    }
+
+    function _grantRole(bytes32 role, address account) internal {
+        if (account == address(0)) revert OXRoles__ZeroAddress();
+        if (!_hasRole[role][account]) {
+            _hasRole[role][account] = true;
+            emit OX_RoleGranted(role, account, msg.sender);
+        }
+    }
+
+    function _revokeRole(bytes32 role, address account) internal {
+        if (_hasRole[role][account]) {
+            _hasRole[role][account] = false;
+            emit OX_RoleRevoked(role, account, msg.sender);
+        }
+    }
+
+    function _lockRole(bytes32 role) internal {
+        if (_roleLocked[role]) revert OXRoles__RoleLocked(role);
+        _roleLocked[role] = true;
+        emit OX_RoleLocked(role, msg.sender);
+    }
+}
+
+library OXRing {
+    error OXRing__BadIndex();
+    error OXRing__ZeroCapacity();
+
+    struct U64Ring {
+        uint64 head;
+        uint64 count;
+        uint64 cap;
+        mapping(uint256 => uint64) at;
+    }
+
+    function init(U64Ring storage r, uint64 capacity) internal {
+        if (capacity == 0) revert OXRing__ZeroCapacity();
+        r.cap = capacity;
+    }
+
+    function push(U64Ring storage r, uint64 v) internal {
+        uint64 cap = r.cap;
+        if (cap == 0) revert OXRing__ZeroCapacity();
+        uint64 idx = r.head;
+        r.at[uint256(idx)] = v;
+        unchecked {
+            r.head = uint64((uint256(idx) + 1) % uint256(cap));
+        }
+        if (r.count < cap) r.count += 1;
+    }
+
+    function size(U64Ring storage r) internal view returns (uint64) {
