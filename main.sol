@@ -63,3 +63,68 @@ library OXMath {
     function wadDiv(uint256 a, uint256 b) internal pure returns (uint256) {
         if (b == 0) return type(uint256).max;
         return (a * WAD) / b;
+    }
+
+    function clamp(uint256 x, uint256 lo, uint256 hi) internal pure returns (uint256) {
+        if (x < lo) return lo;
+        if (x > hi) return hi;
+        return x;
+    }
+}
+
+library OXERC20 {
+    error OXERC20__TransferFailed();
+    error OXERC20__TransferFromFailed();
+
+    function safeTransfer(IERC20Like token, address to, uint256 amount) internal {
+        (bool ok, bytes memory ret) = address(token).call(abi.encodeWithSelector(token.transfer.selector, to, amount));
+        if (!ok) revert OXERC20__TransferFailed();
+        if (ret.length > 0 && !abi.decode(ret, (bool))) revert OXERC20__TransferFailed();
+    }
+
+    function safeTransferFrom(IERC20Like token, address from, address to, uint256 amount) internal {
+        (bool ok, bytes memory ret) =
+            address(token).call(abi.encodeWithSelector(token.transferFrom.selector, from, to, amount));
+        if (!ok) revert OXERC20__TransferFromFailed();
+        if (ret.length > 0 && !abi.decode(ret, (bool))) revert OXERC20__TransferFromFailed();
+    }
+}
+
+abstract contract OXReentrancy {
+    error OXReentrancy__Reentered();
+
+    uint256 private _oxGuard = 1;
+
+    modifier nonReentrant() {
+        if (_oxGuard != 1) revert OXReentrancy__Reentered();
+        _oxGuard = 2;
+        _;
+        _oxGuard = 1;
+    }
+}
+
+abstract contract OXPausable {
+    error OXPausable__Paused();
+
+    bool public paused;
+
+    modifier whenLive() {
+        if (paused) revert OXPausable__Paused();
+        _;
+    }
+
+    function _setPaused(bool v) internal {
+        paused = v;
+    }
+}
+
+abstract contract OXRoles {
+    error OXRoles__Denied(bytes32 role, address who);
+    error OXRoles__ZeroAddress();
+    error OXRoles__RoleLocked(bytes32 role);
+
+    event OX_RoleGranted(bytes32 indexed role, address indexed account, address indexed caller);
+    event OX_RoleRevoked(bytes32 indexed role, address indexed account, address indexed caller);
+    event OX_RoleLocked(bytes32 indexed role, address indexed locker);
+
+    mapping(bytes32 => mapping(address => bool)) internal _hasRole;
