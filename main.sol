@@ -843,3 +843,68 @@ contract OpiusXX is OXRoles, OXPausable, OXReentrancy {
         if (take > remaining) take = remaining;
 
         out = new Signal[](take);
+        for (uint64 i = 0; i < take; i++) {
+            uint64 age = offsetAge + i;
+            uint64 idx = _sigIx[instrumentId].getNewestFirst(age);
+            out[i] = _sig[instrumentId][uint256(idx)];
+        }
+    }
+
+    function terminalFingerprint() external view returns (bytes32) {
+        bytes32 a = keccak256(abi.encodePacked(_OPX_SEED_A, ANCHOR_0, address(this), lastBatchSeq));
+        bytes32 b = keccak256(abi.encodePacked(_OPX_SEED_B, ANCHOR_1, block.chainid, lastBatchTs));
+        bytes32 c = keccak256(abi.encodePacked(_OPX_SEED_C, ANCHOR_2, feeSink, feePerBatch));
+        bytes32 d = keccak256(abi.encodePacked(_OPX_SEED_D, ANCHOR_3, instrumentCount, lastManifestHash));
+        return keccak256(abi.encodePacked(a, b, c, d, _OPX_SEED_E));
+    }
+
+    // ============
+    // Convenience views for UIs
+    // ============
+    function snapshot(uint32 instrumentId)
+        external
+        view
+        returns (
+            bytes16 symbol,
+            uint8 decimals,
+            uint8 kind,
+            bool active,
+            Quote memory q,
+            Tape memory lastPrint,
+            Signal memory lastSig
+        )
+    {
+        Instrument storage ins = instruments[instrumentId];
+        if (ins.symbol == bytes16(0)) revert OPX__UnknownInstrument(instrumentId);
+        symbol = ins.symbol;
+        decimals = ins.decimals;
+        kind = ins.kind;
+        active = ins.active;
+        q = lastQuote[instrumentId];
+
+        uint64 tn = _tapeIx[instrumentId].size();
+        if (tn > 0) {
+            uint64 idx = _tapeIx[instrumentId].getNewestFirst(0);
+            lastPrint = _tape[instrumentId][uint256(idx)];
+        }
+
+        uint64 sn = _sigIx[instrumentId].size();
+        if (sn > 0) {
+            uint64 idx2 = _sigIx[instrumentId].getNewestFirst(0);
+            lastSig = _sig[instrumentId][uint256(idx2)];
+        }
+    }
+
+    function derived(uint32 instrumentId, uint64 tapeLookback)
+        external
+        view
+        returns (int64 vwapPx, int64 imbalanceBps, uint64 prints, int64 absMoveBps)
+    {
+        Instrument storage ins = instruments[instrumentId];
+        if (ins.symbol == bytes16(0)) revert OPX__UnknownInstrument(instrumentId);
+
+        uint64 n = _tapeIx[instrumentId].size();
+        if (n == 0) return (0, 0, 0, 0);
+        uint64 take = tapeLookback;
+        if (take == 0) take = 24;
+        if (take > n) take = n;
