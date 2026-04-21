@@ -258,3 +258,68 @@ contract OpiusXX is OXRoles, OXPausable, OXReentrancy {
     bytes32 public constant ROLE_RISK = keccak256("OpiusXX.ROLE_RISK");
     bytes32 public constant ROLE_FEESINK = keccak256("OpiusXX.ROLE_FEESINK");
 
+    // ============
+    // Immutable anchors (workspace-unique, no special power)
+    // ============
+    address public immutable ANCHOR_0;
+    address public immutable ANCHOR_1;
+    address public immutable ANCHOR_2;
+    address public immutable ANCHOR_3;
+
+    // ============
+    // Fee policy
+    // ============
+    IERC20Like public feeToken;
+    uint256 public feePerBatch;
+    address public feeSink;
+    uint256 public constant MAX_FEE_PER_BATCH = 9_900_000 * 1e6;
+
+    // ============
+    // Terminal identity constants (fresh identifiers for this output)
+    // ============
+    bytes32 private constant _OPX_SEED_A =
+        hex"2ecd981c4f3d03d5999eb1a1000cf00bd84421f4153a107c74a8af63f2293ec1";
+    bytes32 private constant _OPX_SEED_B =
+        hex"f804c492e7c7ce7b2bd2dcfdcc0cecae4bd5d2bbeab9816cf9ae04ec6c7e7334";
+    bytes32 private constant _OPX_SEED_C =
+        hex"a0ed39ecab829a7fbdd1c5d23986748bed4a5e11c24410a0d1a5dbf02f927c52";
+    bytes32 private constant _OPX_SEED_D =
+        hex"2303c267408e2f31b29433eaf004db5c9c04e730914fd172de7061cf6633e6ca";
+    bytes32 private constant _OPX_SEED_E =
+        hex"1fe620bf1c73a00e9f61bfb7be5d6ac055bc9c20af1e74a9e5188b1231fc0006";
+
+    // ============
+    // EIP-712 for oracle batches
+    // ============
+    bytes32 public immutable DOMAIN_SEPARATOR;
+    uint256 public immutable DEPLOY_CHAIN_ID;
+    bytes32 private constant _EIP712_DOMAIN_TYPEHASH =
+        keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)");
+
+    bytes32 private constant _BATCH_TYPEHASH = keccak256(
+        "OpiusXXBatch(uint64 batchTs,uint64 batchSeq,uint32 instrumentCount,bytes32 manifestHash,bytes32 dataHash,uint256 fee,uint256 nonce,address payer)"
+    );
+
+    mapping(address => uint256) public oracleNonces;
+
+    // ============
+    // Data model
+    // ============
+    enum InstrumentKind {
+        Spot,
+        Perp,
+        Index,
+        Rate,
+        Synthetic
+    }
+
+    struct Instrument {
+        bytes16 symbol;
+        uint8 decimals;
+        uint8 kind;
+        uint32 maxTapeDepth;
+        uint32 maxSignalDepth;
+        bool active;
+    }
+
+    struct Quote {
