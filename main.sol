@@ -648,3 +648,68 @@ contract OpiusXX is OXRoles, OXPausable, OXReentrancy {
         if (cursor != packed.length) revert OPX__BadCursor();
 
         lastBatchTs = h.batchTs;
+        lastBatchSeq = h.batchSeq;
+        lastManifestHash = h.manifestHash;
+        lastDataHash = h.dataHash;
+
+        emit OPX_BatchAccepted(h.batchTs, h.batchSeq, h.instrumentCountInBatch);
+    }
+
+    function _maybeCollectFee(BatchHeader calldata h) internal {
+        uint256 need = feePerBatch;
+        if (need == 0) return;
+        IERC20Like token = feeToken;
+        if (address(token) == address(0)) revert OPX__FeeTokenUnset();
+
+        if (h.fee != need) revert OPX__FeePaymentFailed();
+        address payer = h.payer == address(0) ? msg.sender : h.payer;
+        token.safeTransferFrom(payer, feeSink, need);
+    }
+
+    function _unpackManifest(bytes32 m) internal pure returns (uint32 quoteRows, uint32 tapeRows, uint32 sigRows) {
+        // 96 bits total: [quoteRows:u32][tapeRows:u32][sigRows:u32] in the low bits
+        uint256 x = uint256(m);
+        quoteRows = uint32(x & 0xffffffff);
+        tapeRows = uint32((x >> 32) & 0xffffffff);
+        sigRows = uint32((x >> 64) & 0xffffffff);
+    }
+
+    function _applyQuotes(uint32 rows, uint256 cursor, bytes calldata packed) internal returns (uint256) {
+        uint256 need = uint256(rows) * 56;
+        if (packed.length < cursor + need) revert OPX__BadCursor();
+
+        for (uint32 i = 0; i < rows; i++) {
+            uint256 off = cursor + uint256(i) * 56;
+
+            uint32 id;
+            uint64 ts;
+            int64 mid;
+            int32 spread;
+            int32 funding;
+            uint64 oi;
+
+            assembly {
+                let w0 := calldataload(add(packed.offset, off))
+                id := shr(224, w0)
+                ts := and(shr(160, w0), 0xffffffffffffffff)
+                mid := signextend(7, and(shr(96, w0), 0xffffffffffffffff))
+                spread := signextend(3, and(shr(64, w0), 0xffffffff))
+                funding := signextend(3, and(shr(32, w0), 0xffffffff))
+                oi := and(w0, 0xffffffffffffffff)
+            }
+
+            Instrument storage ins = instruments[id];
+            if (ins.symbol == bytes16(0) || !ins.active) revert OPX__UnknownInstrument(id);
+
+            lastQuote[id] = Quote({ts: ts, midPx: mid, spreadBps: spread, fundingBps: funding, openInterest: oi});
+        }
+
+        return cursor + need;
+    }
+
+    function _applyTape(uint32 rows, uint256 cursor, bytes calldata packed) internal returns (uint256) {
+        uint256 need = uint256(rows) * 32;
+        if (packed.length < cursor + need) revert OPX__BadCursor();
+
+        for (uint32 i = 0; i < rows; i++) {
+            uint256 off = cursor + uint256(i) * 32;
