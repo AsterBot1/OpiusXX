@@ -778,3 +778,68 @@ contract OpiusXX is OXRoles, OXPausable, OXReentrancy {
     function _hash(BatchHeader calldata h) internal pure returns (bytes32) {
         return keccak256(
             abi.encode(
+                _BATCH_TYPEHASH,
+                h.batchTs,
+                h.batchSeq,
+                h.instrumentCountInBatch,
+                h.manifestHash,
+                h.dataHash,
+                h.fee,
+                h.nonce,
+                h.payer
+            )
+        );
+    }
+
+    function _recover(BatchHeader calldata h, BatchSig calldata sig) internal view returns (address) {
+        bytes32 digest = keccak256(abi.encodePacked("\x19\x01", DOMAIN_SEPARATOR, _hash(h)));
+        address recovered = ecrecover(digest, sig.v, sig.r, sig.s);
+        return recovered;
+    }
+
+    // ============
+    // Reads: paging for terminals
+    // ============
+    function getInstrument(uint32 instrumentId) external view returns (Instrument memory ins, Quote memory q) {
+        ins = instruments[instrumentId];
+        if (ins.symbol == bytes16(0)) revert OPX__UnknownInstrument(instrumentId);
+        q = lastQuote[instrumentId];
+    }
+
+    function getTapeNewestFirst(uint32 instrumentId, uint64 offsetAge, uint64 limit)
+        external
+        view
+        returns (Tape[] memory out)
+    {
+        Instrument storage ins = instruments[instrumentId];
+        if (ins.symbol == bytes16(0)) revert OPX__UnknownInstrument(instrumentId);
+
+        uint64 n = _tapeIx[instrumentId].size();
+        if (offsetAge > n) revert OPX__OutOfRange();
+        uint64 remaining = n - offsetAge;
+        uint64 take = limit;
+        if (take > remaining) take = remaining;
+
+        out = new Tape[](take);
+        for (uint64 i = 0; i < take; i++) {
+            uint64 age = offsetAge + i;
+            uint64 idx = _tapeIx[instrumentId].getNewestFirst(age);
+            out[i] = _tape[instrumentId][uint256(idx)];
+        }
+    }
+
+    function getSignalsNewestFirst(uint32 instrumentId, uint64 offsetAge, uint64 limit)
+        external
+        view
+        returns (Signal[] memory out)
+    {
+        Instrument storage ins = instruments[instrumentId];
+        if (ins.symbol == bytes16(0)) revert OPX__UnknownInstrument(instrumentId);
+
+        uint64 n = _sigIx[instrumentId].size();
+        if (offsetAge > n) revert OPX__OutOfRange();
+        uint64 remaining = n - offsetAge;
+        uint64 take = limit;
+        if (take > remaining) take = remaining;
+
+        out = new Signal[](take);
