@@ -908,3 +908,58 @@ contract OpiusXX is OXRoles, OXPausable, OXReentrancy {
         uint64 take = tapeLookback;
         if (take == 0) take = 24;
         if (take > n) take = n;
+        if (take > 256) take = 256;
+
+        int256 notional = 0;
+        int256 vol = 0;
+        int256 buyQty = 0;
+        int256 sellQty = 0;
+        int256 firstPx = 0;
+        int256 lastPx = 0;
+
+        for (uint64 i = 0; i < take; i++) {
+            uint64 idx = _tapeIx[instrumentId].getNewestFirst(i);
+            Tape memory t = _tape[instrumentId][uint256(idx)];
+            if (i == take - 1) firstPx = int256(t.px);
+            if (i == 0) lastPx = int256(t.px);
+
+            int256 q = int256(t.qty);
+            int256 p = int256(t.px);
+            int256 qAbs = q >= 0 ? q : -q;
+            notional += p * qAbs;
+            vol += qAbs;
+            if (t.side == 1) buyQty += qAbs;
+            else if (t.side == 2) sellQty += qAbs;
+        }
+
+        prints = take;
+        if (vol > 0) vwapPx = int64(notional / vol);
+        int256 denom = buyQty + sellQty;
+        if (denom > 0) imbalanceBps = int64(((buyQty - sellQty) * 10_000) / denom);
+
+        int256 mid = int256(lastQuote[instrumentId].midPx);
+        if (mid == 0) mid = lastPx;
+        int256 move = lastPx - firstPx;
+        int256 moveAbs = move >= 0 ? move : -move;
+        if (mid != 0) absMoveBps = int64((moveAbs * 10_000) / mid);
+    }
+
+    function listPage(uint32 cursorId, uint32 limit) external view returns (Instrument[] memory page, uint32 nextCursor) {
+        uint32 n = instrumentCount;
+        if (cursorId == 0) cursorId = 1;
+        if (cursorId > n + 1) revert OPX__OutOfRange();
+
+        uint32 remaining = cursorId <= n ? (n - cursorId + 1) : 0;
+        uint32 take = limit;
+        if (take > remaining) take = remaining;
+
+        page = new Instrument[](take);
+        for (uint32 i = 0; i < take; i++) {
+            uint32 id = cursorId + i;
+            page[i] = instruments[id];
+        }
+
+        nextCursor = cursorId + take;
+        if (nextCursor > n) nextCursor = 0;
+    }
+}
