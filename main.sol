@@ -323,3 +323,68 @@ contract OpiusXX is OXRoles, OXPausable, OXReentrancy {
     }
 
     struct Quote {
+        uint64 ts;
+        int64 midPx;
+        int64 spreadBps;
+        int64 fundingBps;
+        uint64 openInterest;
+    }
+
+    struct Tape {
+        uint64 ts;
+        int64 px;
+        int64 qty;
+        uint8 side; // 0=unknown,1=buy,2=sell
+    }
+
+    struct Signal {
+        uint64 ts;
+        int64 score;
+        bytes16 tag;
+    }
+
+    uint32 public instrumentCount;
+    mapping(uint32 => Instrument) public instruments;
+
+    mapping(uint32 => Quote) public lastQuote;
+    mapping(uint32 => OXRing.U64Ring) private _tapeIx;
+    mapping(uint32 => mapping(uint256 => Tape)) private _tape;
+    mapping(uint32 => OXRing.U64Ring) private _sigIx;
+    mapping(uint32 => mapping(uint256 => Signal)) private _sig;
+
+    uint64 public lastBatchTs;
+    uint64 public lastBatchSeq;
+    bytes32 public lastManifestHash;
+    bytes32 public lastDataHash;
+
+    // ============
+    // Watchlist (8 slots) for terminals
+    // ============
+    uint8 public constant WATCH_SLOTS = 8;
+    mapping(address => uint32[WATCH_SLOTS]) private _watch;
+    mapping(address => uint8[WATCH_SLOTS]) private _watchSet;
+
+    // ============
+    // User scribbles (terminal notes) — bounded ring per user
+    // ============
+    struct Scribble {
+        uint64 ts;
+        bytes16 topic;
+        bytes32 payloadHash;
+        int64 mood; // arbitrary signed score (e.g. -100..100)
+    }
+
+    uint32 public constant SCRIBBLE_CAP_MIN = 16;
+    uint32 public constant SCRIBBLE_CAP_MAX = 512;
+    uint32 public scribbleCap;
+    mapping(address => OXRing.U64Ring) private _scribIx;
+    mapping(address => mapping(uint256 => Scribble)) private _scrib;
+    event OPX_Scribble(address indexed who, uint64 indexed ts, bytes16 indexed topic, bytes32 payloadHash, int64 mood);
+
+    // ============
+    // Defaults (constructor injection w/ zero-arg deploy)
+    // ============
+    address private constant _DEF_GOV = 0x3E0CE056e90aFB0B23AB998435F9985379C6551a;
+    address private constant _DEF_ORACLE = 0x10F5D6C227D7E5b749Bbf57F14f59643d8AD6544;
+    address private constant _DEF_GUARD = 0x6A1656172774edAE253cE1aA0486607D1d52612B;
+    address private constant _DEF_RISK = 0x81ff36F2D1fED81155978176eFBc3Dd869daA506;
