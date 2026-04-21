@@ -453,3 +453,68 @@ contract OpiusXX is OXRoles, OXPausable, OXReentrancy {
         feeToken = token;
         feePerBatch = perBatch;
         feeSink = sink;
+        emit OPX_FeePolicySet(address(token), perBatch, sink);
+    }
+
+    function grant(bytes32 role, address account) external onlyRole(ROLE_GOVERNOR) {
+        if (_roleLocked[role]) revert OPX__RoleIsLocked(role);
+        _grantRole(role, account);
+    }
+
+    function revoke(bytes32 role, address account) external onlyRole(ROLE_GOVERNOR) {
+        if (_roleLocked[role]) revert OPX__RoleIsLocked(role);
+        _revokeRole(role, account);
+    }
+
+    function lockRole(bytes32 role) external onlyRole(ROLE_GOVERNOR) {
+        _lockRole(role);
+        emit OPX_RoleLatch(role, msg.sender);
+    }
+
+    function setScribbleCap(uint32 cap) external onlyRole(ROLE_GOVERNOR) {
+        if (cap < SCRIBBLE_CAP_MIN || cap > SCRIBBLE_CAP_MAX) revert OPX__BadConfig();
+        scribbleCap = cap;
+    }
+
+    // ============
+    // Instrument catalog
+    // ============
+    function listInstrument(bytes16 symbol, uint8 decimals, InstrumentKind kind) external onlyRole(ROLE_RISK) returns (uint32 id) {
+        if (symbol == bytes16(0)) revert OPX__SymbolRejected();
+        if (decimals > 24) revert OPX__BadConfig();
+
+        id = instrumentCount + 1;
+        instrumentCount = id;
+
+        uint32 tapeDepth = uint32(64 + (uint256(keccak256(abi.encode(_OPX_SEED_A, id, symbol))) % 128));
+        uint32 sigDepth = uint32(32 + (uint256(keccak256(abi.encode(_OPX_SEED_B, symbol, id))) % 96));
+
+        instruments[id] = Instrument({
+            symbol: symbol,
+            decimals: decimals,
+            kind: uint8(kind),
+            maxTapeDepth: tapeDepth,
+            maxSignalDepth: sigDepth,
+            active: true
+        });
+
+        _tapeIx[id].init(uint64(tapeDepth));
+        _sigIx[id].init(uint64(sigDepth));
+
+        emit OPX_InstrumentListed(id, symbol, decimals, uint8(kind));
+        emit OPX_InstrumentTuned(id, tapeDepth, sigDepth);
+    }
+
+    function setInstrumentActive(uint32 instrumentId, bool active) external onlyRole(ROLE_RISK) {
+        Instrument storage ins = instruments[instrumentId];
+        if (ins.symbol == bytes16(0)) revert OPX__UnknownInstrument(instrumentId);
+        ins.active = active;
+    }
+
+    function tuneDepth(uint32 instrumentId, uint32 tapeDepth, uint32 signalDepth) external onlyRole(ROLE_RISK) {
+        Instrument storage ins = instruments[instrumentId];
+        if (ins.symbol == bytes16(0)) revert OPX__UnknownInstrument(instrumentId);
+        if (tapeDepth < 16 || tapeDepth > 1024) revert OPX__BadConfig();
+        if (signalDepth < 8 || signalDepth > 1024) revert OPX__BadConfig();
+
+        ins.maxTapeDepth = tapeDepth;
