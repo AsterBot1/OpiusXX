@@ -388,3 +388,68 @@ contract OpiusXX is OXRoles, OXPausable, OXReentrancy {
     address private constant _DEF_ORACLE = 0x10F5D6C227D7E5b749Bbf57F14f59643d8AD6544;
     address private constant _DEF_GUARD = 0x6A1656172774edAE253cE1aA0486607D1d52612B;
     address private constant _DEF_RISK = 0x81ff36F2D1fED81155978176eFBc3Dd869daA506;
+    address private constant _DEF_SINK = 0xfdc679937f21365Ab1c64d7fb8d9DB4974748b55;
+
+    address private constant _DEF_ANCH0 = 0x884922d2D7c7F841a740f5109491c93aF587f225;
+    address private constant _DEF_ANCH1 = 0xf7e1A45c4Ec3693d4D8685bBE51494f24859d2F2;
+    address private constant _DEF_ANCH2 = 0x914FAC317e024038Bd7769537d051F12D6bE799F;
+    address private constant _DEF_ANCH3 = 0x6a8b44d6881F1F428a1f0E5513db9B247AFA9F77;
+
+    address private constant _DEF_FEE_TOKEN = 0xa735860Cc110c7B23079f87755B4FdD924D361FA;
+
+    // ============
+    // Constructor
+    // ============
+    constructor(address governor, address oracle, address guardian, address risk, address sink, address feeToken_) {
+        address gov = governor == address(0) ? _DEF_GOV : governor;
+        address ora = oracle == address(0) ? _DEF_ORACLE : oracle;
+        address grd = guardian == address(0) ? _DEF_GUARD : guardian;
+        address rsk = risk == address(0) ? _DEF_RISK : risk;
+        address snk = sink == address(0) ? _DEF_SINK : sink;
+
+        _grantRole(ROLE_GOVERNOR, gov);
+        _grantRole(ROLE_ORACLE, ora);
+        _grantRole(ROLE_GUARDIAN, grd);
+        _grantRole(ROLE_RISK, rsk);
+        _grantRole(ROLE_FEESINK, snk);
+
+        ANCHOR_0 = _DEF_ANCH0;
+        ANCHOR_1 = _DEF_ANCH1;
+        ANCHOR_2 = _DEF_ANCH2;
+        ANCHOR_3 = _DEF_ANCH3;
+
+        IERC20Like ft = IERC20Like(feeToken_ == address(0) ? _DEF_FEE_TOKEN : feeToken_);
+        feeToken = ft;
+        feeSink = snk;
+        feePerBatch = 0;
+
+        uint32 cap = uint32(48 + (uint256(keccak256(abi.encode(_OPX_SEED_E, block.prevrandao, address(this)))) % 144));
+        scribbleCap = cap;
+
+        DEPLOY_CHAIN_ID = block.chainid;
+        DOMAIN_SEPARATOR = keccak256(
+            abi.encode(
+                _EIP712_DOMAIN_TYPEHASH,
+                keccak256(bytes("OpiusXX")),
+                keccak256(bytes("0.9.7")),
+                block.chainid,
+                address(this)
+            )
+        );
+    }
+
+    // ============
+    // Governance
+    // ============
+    function setPaused(bool v) external onlyRole(ROLE_GUARDIAN) {
+        _setPaused(v);
+        emit OPX_Paused(v);
+    }
+
+    function setFeePolicy(IERC20Like token, uint256 perBatch, address sink) external onlyRole(ROLE_GOVERNOR) {
+        if (address(token) == address(0)) revert OPX__BadConfig();
+        if (sink == address(0)) revert OPX__BadConfig();
+        if (perBatch > MAX_FEE_PER_BATCH) revert OPX__FeeTooHigh();
+        feeToken = token;
+        feePerBatch = perBatch;
+        feeSink = sink;
