@@ -583,3 +583,68 @@ contract OpiusXX is OXRoles, OXPausable, OXReentrancy {
         }
     }
 
+    // ============
+    // Oracle batch ingestion
+    // ============
+    struct BatchHeader {
+        uint64 batchTs;
+        uint64 batchSeq;
+        uint32 instrumentCountInBatch;
+        bytes32 manifestHash;
+        bytes32 dataHash;
+        uint256 fee;
+        uint256 nonce;
+        address payer;
+    }
+
+    struct BatchSig {
+        uint8 v;
+        bytes32 r;
+        bytes32 s;
+    }
+
+    /// @notice Accept an oracle-signed batch.
+    /// @dev `packed` encodes rows; this avoids arrays-of-structs overhead.
+    /// Layout:
+    /// - Quotes: instrumentCountInBatch rows of 56 bytes:
+    ///   [u32 id][u64 ts][i64 mid][i32 spreadBps][i32 fundingBps][u64 oi]
+    /// - Tape: variable rows of 32 bytes:
+    ///   [u32 id][u64 ts][i64 px][i32 qty32][u8 side][u8 pad][u16 pad]
+    /// - Signals: variable rows of 32 bytes:
+    ///   [u32 id][u64 ts][i64 score][bytes16 tag]
+    /// With section cursors in `manifestHash` high bits to prevent ambiguous parsing.
+    function ingest(
+        BatchHeader calldata h,
+        BatchSig calldata sig,
+        bytes calldata packed
+    ) external whenLive nonReentrant {
+        if (!hasRole(ROLE_ORACLE, msg.sender) && !hasRole(ROLE_ORACLE, _recover(h, sig))) {
+            revert OPX__SignatureRejected();
+        }
+
+        if (h.batchTs < lastBatchTs) revert OPX__StaleBatch(h.batchTs);
+        if (h.batchTs == lastBatchTs && h.batchSeq <= lastBatchSeq) revert OPX__StaleBatch(h.batchTs);
+
+        address signer = _recover(h, sig);
+        if (!hasRole(ROLE_ORACLE, signer)) revert OPX__SignatureRejected();
+
+        if (oracleNonces[signer] != h.nonce) revert OPX__NonceMismatch();
+        oracleNonces[signer] = h.nonce + 1;
+
+        if (h.instrumentCountInBatch == 0 || h.instrumentCountInBatch > instrumentCount) revert OPX__BadConfig();
+
+        bytes32 computed = keccak256(packed);
+        if (computed != h.dataHash) revert OPX__SignatureRejected();
+
+        _maybeCollectFee(h);
+
+        (uint32 quoteRows, uint32 tapeRows, uint32 sigRows) = _unpackManifest(h.manifestHash);
+        if (quoteRows != h.instrumentCountInBatch) revert OPX__BadConfig();
+
+        uint256 cursor = 0;
+        cursor = _applyQuotes(quoteRows, cursor, packed);
+        cursor = _applyTape(tapeRows, cursor, packed);
+        cursor = _applySignals(sigRows, cursor, packed);
+        if (cursor != packed.length) revert OPX__BadCursor();
+
+        lastBatchTs = h.batchTs;
