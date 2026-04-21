@@ -518,3 +518,68 @@ contract OpiusXX is OXRoles, OXPausable, OXReentrancy {
         if (signalDepth < 8 || signalDepth > 1024) revert OPX__BadConfig();
 
         ins.maxTapeDepth = tapeDepth;
+        ins.maxSignalDepth = signalDepth;
+        _tapeIx[instrumentId].init(uint64(tapeDepth));
+        _sigIx[instrumentId].init(uint64(signalDepth));
+        emit OPX_InstrumentTuned(instrumentId, tapeDepth, signalDepth);
+    }
+
+    // ============
+    // Watchlist
+    // ============
+    function pinWatch(uint8 slot, uint32 instrumentId) external {
+        if (slot >= WATCH_SLOTS) revert OPX__OutOfRange();
+        if (instrumentId != 0) {
+            Instrument storage ins = instruments[instrumentId];
+            if (ins.symbol == bytes16(0) || !ins.active) revert OPX__UnknownInstrument(instrumentId);
+            _watch[msg.sender][slot] = instrumentId;
+            _watchSet[msg.sender][slot] = 1;
+            emit OPX_WatchPinned(msg.sender, instrumentId, slot);
+        } else {
+            _watch[msg.sender][slot] = 0;
+            _watchSet[msg.sender][slot] = 0;
+            emit OPX_WatchCleared(msg.sender, slot);
+        }
+    }
+
+    function getWatch(address who) external view returns (uint32[WATCH_SLOTS] memory ids, uint8[WATCH_SLOTS] memory isSet) {
+        return (_watch[who], _watchSet[who]);
+    }
+
+    // ============
+    // Scribbles
+    // ============
+    function postScribble(bytes16 topic, bytes32 payloadHash, int64 mood) external whenLive {
+        if (topic == bytes16(0) || payloadHash == bytes32(0)) revert OPX__BadConfig();
+        if (mood < -10_000 || mood > 10_000) revert OPX__OutOfRange();
+
+        OXRing.U64Ring storage r = _scribIx[msg.sender];
+        if (r.capacity() == 0) r.init(uint64(scribbleCap));
+
+        uint64 idx = r.size();
+        r.push(uint64(idx));
+        uint64 ts = uint64(block.timestamp);
+        _scrib[msg.sender][uint256(idx)] = Scribble({ts: ts, topic: topic, payloadHash: payloadHash, mood: mood});
+        emit OPX_Scribble(msg.sender, ts, topic, payloadHash, mood);
+    }
+
+    function getScribblesNewestFirst(address who, uint64 offsetAge, uint64 limit)
+        external
+        view
+        returns (Scribble[] memory out)
+    {
+        OXRing.U64Ring storage r = _scribIx[who];
+        uint64 n = r.size();
+        if (offsetAge > n) revert OPX__OutOfRange();
+        uint64 remaining = n - offsetAge;
+        uint64 take = limit;
+        if (take > remaining) take = remaining;
+
+        out = new Scribble[](take);
+        for (uint64 i = 0; i < take; i++) {
+            uint64 age = offsetAge + i;
+            uint64 idx = r.getNewestFirst(age);
+            out[i] = _scrib[who][uint256(idx)];
+        }
+    }
+
