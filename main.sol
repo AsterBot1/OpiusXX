@@ -713,3 +713,68 @@ contract OpiusXX is OXRoles, OXPausable, OXReentrancy {
 
         for (uint32 i = 0; i < rows; i++) {
             uint256 off = cursor + uint256(i) * 32;
+
+            uint32 id;
+            uint64 ts;
+            int64 px;
+            int32 qty32;
+            uint8 side;
+
+            assembly {
+                let w0 := calldataload(add(packed.offset, off))
+                id := shr(224, w0)
+                ts := and(shr(160, w0), 0xffffffffffffffff)
+                px := signextend(7, and(shr(96, w0), 0xffffffffffffffff))
+                qty32 := signextend(3, and(shr(64, w0), 0xffffffff))
+                side := and(shr(56, w0), 0xff)
+            }
+
+            Instrument storage ins = instruments[id];
+            if (ins.symbol == bytes16(0) || !ins.active) revert OPX__UnknownInstrument(id);
+
+            uint64 idx = _tapeIx[id].size();
+            _tapeIx[id].push(uint64(idx));
+            _tape[id][uint256(idx)] = Tape({ts: ts, px: px, qty: int64(qty32), side: side});
+
+            emit OPX_TapePrint(id, ts, px, int64(qty32), side);
+        }
+
+        return cursor + need;
+    }
+
+    function _applySignals(uint32 rows, uint256 cursor, bytes calldata packed) internal returns (uint256) {
+        uint256 need = uint256(rows) * 32;
+        if (packed.length < cursor + need) revert OPX__BadCursor();
+
+        for (uint32 i = 0; i < rows; i++) {
+            uint256 off = cursor + uint256(i) * 32;
+
+            uint32 id;
+            uint64 ts;
+            int64 score;
+            bytes16 tag;
+
+            assembly {
+                let w0 := calldataload(add(packed.offset, off))
+                id := shr(224, w0)
+                ts := and(shr(160, w0), 0xffffffffffffffff)
+                score := signextend(7, and(shr(96, w0), 0xffffffffffffffff))
+                tag := and(w0, 0xffffffffffffffffffffffffffffffffffff)
+            }
+
+            Instrument storage ins = instruments[id];
+            if (ins.symbol == bytes16(0) || !ins.active) revert OPX__UnknownInstrument(id);
+
+            uint64 idx = _sigIx[id].size();
+            _sigIx[id].push(uint64(idx));
+            _sig[id][uint256(idx)] = Signal({ts: ts, score: score, tag: tag});
+
+            emit OPX_SignalPushed(id, ts, score, tag);
+        }
+
+        return cursor + need;
+    }
+
+    function _hash(BatchHeader calldata h) internal pure returns (bytes32) {
+        return keccak256(
+            abi.encode(
